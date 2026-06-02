@@ -195,6 +195,35 @@ def handle_command(tokens: List[str]) -> bool:
                 except Exception as e:
                     print(f"rm: cannot remove '{filename}': {e}")
         return True
+        
+    elif command == "cat":
+        if not arguments:
+            print("cat: missing operand")
+        else:
+            # cat membaca semua file yang diberikan dalam argumen dan menggabungkannya ke standar output
+            for filename in arguments:
+                try:
+                    with open(filename, 'r') as f:
+                        MAX_CHARS = 2000  # Batas maksimal karakter yang ditampilkan
+                        
+                        # Membaca isi file hingga batas maksimal
+                        content = f.read(MAX_CHARS)
+                        print(content, end="")
+                        
+                        # Mengecek apakah masih ada sisa teks dengan mencoba membaca 1 karakter ekstra
+                        if f.read(1):
+                            print(f"\n\n[... File terlalu besar. Sisa teks disembunyikan setelah {MAX_CHARS} karakter ...]")
+                except FileNotFoundError:
+                    print(f"cat: {filename}: No such file or directory")
+                except IsADirectoryError:
+                    print(f"cat: {filename}: Is a directory")
+                except PermissionError:
+                    print(f"cat: {filename}: Permission denied")
+                except Exception as e:
+                    print(f"cat: {filename}: {e}")
+            # Cetak baris baru (newline) ekstra di akhir untuk merapikan prompt berikutnya
+            print()
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
