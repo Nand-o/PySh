@@ -159,6 +159,24 @@ def handle_command(tokens: List[str]) -> bool:
                 except Exception as e:
                     print(f"mkdir: cannot create directory '{dirname}': {e}")
         return True
+        
+    elif command == "rmdir":
+        if not arguments:
+            print("rmdir: missing operand")
+        else:
+            for dirname in arguments:
+                try:
+                    os.rmdir(dirname)
+                except FileNotFoundError:
+                    print(f"rmdir: failed to remove '{dirname}': No such file or directory")
+                except NotADirectoryError:
+                    print(f"rmdir: failed to remove '{dirname}': Not a directory")
+                except OSError as e:
+                    # Termasuk error jika direktori tidak kosong (Directory not empty)
+                    print(f"rmdir: failed to remove '{dirname}': {e.strerror}")
+                except Exception as e:
+                    print(f"rmdir: failed to remove '{dirname}': {e}")
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
