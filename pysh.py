@@ -124,6 +124,23 @@ def handle_command(tokens: List[str]) -> bool:
         except Exception as e:
             print(f"ls: {e}")
         return True
+        
+    elif command == "touch":
+        if not arguments:
+            print("touch: missing file operand")
+        else:
+            # Touch mendukung multiple file (contoh: touch file1.txt file2.txt)
+            for filename in arguments:
+                try:
+                    # Buka dengan mode append ('a') agar file dibuat jika belum ada,
+                    # dan tidak menghapus isi jika file sudah ada (analog dengan O_CREAT).
+                    with open(filename, 'a'):
+                        pass
+                    # Perbarui timestamp access dan modification ke waktu sekarang
+                    os.utime(filename, None)
+                except Exception as e:
+                    print(f"touch: cannot touch '{filename}': {e}")
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
