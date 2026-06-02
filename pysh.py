@@ -14,7 +14,12 @@ EXIT_COMMAND = "exit"
 
 def get_prompt() -> str:
     """Mengembalikan teks prompt yang ditampilkan kepada pengguna."""
-    return PROMPT
+    cwd = os.getcwd()
+    parts = cwd.split(os.sep)
+    if len(parts) > 3:
+        return f"[{parts[0]}{os.sep}...{os.sep}{parts[-1]}] {PROMPT}"
+    else:
+        return f"[{cwd}] {PROMPT}"
 
 def read_input(prompt: str) -> str:
     """Membaca satu baris input dan menangani EOF (Ctrl+D) sebagai perintah exit."""
@@ -44,6 +49,31 @@ def handle_command(tokens: List[str]) -> bool:
 
     command = tokens[0]
     arguments = tokens[1:]
+
+    if command == "cd":
+        if arguments:
+            try:
+                os.chdir(arguments[0])
+            except FileNotFoundError:
+                print(f"cd: {arguments[0]}: No such file or directory")
+            except NotADirectoryError:
+                print(f"cd: {arguments[0]}: Not a directory")
+            except PermissionError:
+                print(f"cd: {arguments[0]}: Permission denied")
+        else:
+            # Jika cd dipanggil tanpa argumen, ubah ke direktori home
+            try:
+                os.chdir(os.path.expanduser("~"))
+            except Exception as e:
+                print(f"cd: {e}")
+        return True
+        
+    elif command == "pwd":
+        try:
+            print(os.getcwd())
+        except Exception as e:
+            print(f"pwd: {e}")
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
