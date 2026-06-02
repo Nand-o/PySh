@@ -107,6 +107,23 @@ def handle_command(tokens: List[str]) -> bool:
         # Menampilkan kembali teks yang di-passing sebagai argumen
         print(" ".join(arguments))
         return True
+        
+    elif command == "ls":
+        try:
+            # Jika ada argumen, list isi direktori tersebut. Jika tidak, gunakan direktori saat ini.
+            target_dir = arguments[0] if arguments else "."
+            files = os.listdir(target_dir)
+            for f in sorted(files):
+                print(f)
+        except FileNotFoundError:
+            print(f"ls: {target_dir}: No such file or directory")
+        except NotADirectoryError:
+            print(f"ls: {target_dir}: Not a directory")
+        except PermissionError:
+            print(f"ls: {target_dir}: Permission denied")
+        except Exception as e:
+            print(f"ls: {e}")
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
