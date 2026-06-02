@@ -224,6 +224,11 @@ def handle_command(tokens: List[str]) -> bool:
             # Cetak baris baru (newline) ekstra di akhir untuk merapikan prompt berikutnya
             print()
         return True
+        
+    elif command == "clear":
+        # Menghapus teks pada layar terminal/console
+        os.system('cls' if os.name == 'nt' else 'clear')
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
