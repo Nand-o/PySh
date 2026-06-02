@@ -30,10 +30,38 @@ def read_input(prompt: str) -> str:
 
 def tokenize_input(command_line: str) -> List[str]:
     """
-    Memecah string input menjadi token (Perintah Utama dan Argumen).
+    Memecah string input menjadi token (Perintah Utama dan Argumen) secara manual.
+    Mendukung pengelompokan argumen dengan spasi jika diapit tanda kutip tunggal atau ganda.
     """
-    # .strip() menghapus spasi di awal/akhir, lalu .split() memecah kata
-    return command_line.strip().split()
+    tokens = []
+    current_token = []
+    in_quote = None  # Menyimpan jenis tanda kutip yang sedang terbuka (' atau ")
+
+    for char in command_line.strip():
+        if char in ('"', "'"):
+            if in_quote == char:
+                # Jika karakter kutip yang sama ditemukan, tutup kutip tersebut
+                in_quote = None
+            elif in_quote is None:
+                # Jika belum ada kutip yang terbuka, mulai blok kutip
+                in_quote = char
+            else:
+                # Tanda kutip lain di dalam kutip yang sedang aktif
+                current_token.append(char)
+        elif char == ' ' and not in_quote:
+            # Spasi di luar kutip menandakan akhir dari sebuah token
+            if current_token:
+                tokens.append("".join(current_token))
+                current_token = []
+        else:
+            # Karakter lainnya masuk ke token saat ini
+            current_token.append(char)
+            
+    # Masukkan sisa karakter sebagai token terakhir
+    if current_token:
+        tokens.append("".join(current_token))
+        
+    return tokens
 
 def is_exit_command(tokens: List[str]) -> bool:
     """Mengecek apakah pengguna meminta shell untuk berhenti."""
