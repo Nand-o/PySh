@@ -177,6 +177,24 @@ def handle_command(tokens: List[str]) -> bool:
                 except Exception as e:
                     print(f"rmdir: failed to remove '{dirname}': {e}")
         return True
+        
+    elif command == "rm":
+        if not arguments:
+            print("rm: missing operand")
+        else:
+            for filename in arguments:
+                try:
+                    os.remove(filename)
+                except FileNotFoundError:
+                    print(f"rm: cannot remove '{filename}': No such file or directory")
+                except IsADirectoryError:
+                    # Di Windows kadang muncul sebagai PermissionError, tapi kita tangkap standar POSIX-nya
+                    print(f"rm: cannot remove '{filename}': Is a directory")
+                except PermissionError:
+                    print(f"rm: cannot remove '{filename}': Permission denied (might be a directory)")
+                except Exception as e:
+                    print(f"rm: cannot remove '{filename}': {e}")
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
