@@ -141,6 +141,24 @@ def handle_command(tokens: List[str]) -> bool:
                 except Exception as e:
                     print(f"touch: cannot touch '{filename}': {e}")
         return True
+        
+    elif command == "mkdir":
+        if not arguments:
+            print("mkdir: missing operand")
+        else:
+            # Mendukung pembuatan beberapa direktori sekaligus (misal: mkdir dir1 dir2)
+            for dirname in arguments:
+                try:
+                    os.mkdir(dirname)
+                except FileExistsError:
+                    print(f"mkdir: cannot create directory '{dirname}': File exists")
+                except FileNotFoundError:
+                    print(f"mkdir: cannot create directory '{dirname}': No such file or directory")
+                except PermissionError:
+                    print(f"mkdir: cannot create directory '{dirname}': Permission denied")
+                except Exception as e:
+                    print(f"mkdir: cannot create directory '{dirname}': {e}")
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
