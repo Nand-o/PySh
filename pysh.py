@@ -102,6 +102,11 @@ def handle_command(tokens: List[str]) -> bool:
         except Exception as e:
             print(f"pwd: {e}")
         return True
+        
+    elif command == "echo":
+        # Menampilkan kembali teks yang di-passing sebagai argumen
+        print(" ".join(arguments))
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
