@@ -14,7 +14,12 @@ EXIT_COMMAND = "exit"
 
 def get_prompt() -> str:
     """Mengembalikan teks prompt yang ditampilkan kepada pengguna."""
-    return PROMPT
+    cwd = os.getcwd()
+    parts = cwd.split(os.sep)
+    if len(parts) > 3:
+        return f"[{parts[0]}{os.sep}...{os.sep}{parts[-1]}] {PROMPT}"
+    else:
+        return f"[{cwd}] {PROMPT}"
 
 def read_input(prompt: str) -> str:
     """Membaca satu baris input dan menangani EOF (Ctrl+D) sebagai perintah exit."""
@@ -25,10 +30,38 @@ def read_input(prompt: str) -> str:
 
 def tokenize_input(command_line: str) -> List[str]:
     """
-    Memecah string input menjadi token (Perintah Utama dan Argumen).
+    Memecah string input menjadi token (Perintah Utama dan Argumen) secara manual.
+    Mendukung pengelompokan argumen dengan spasi jika diapit tanda kutip tunggal atau ganda.
     """
-    # .strip() menghapus spasi di awal/akhir, lalu .split() memecah kata
-    return command_line.strip().split()
+    tokens = []
+    current_token = []
+    in_quote = None  # Menyimpan jenis tanda kutip yang sedang terbuka (' atau ")
+
+    for char in command_line.strip():
+        if char in ('"', "'"):
+            if in_quote == char:
+                # Jika karakter kutip yang sama ditemukan, tutup kutip tersebut
+                in_quote = None
+            elif in_quote is None:
+                # Jika belum ada kutip yang terbuka, mulai blok kutip
+                in_quote = char
+            else:
+                # Tanda kutip lain di dalam kutip yang sedang aktif
+                current_token.append(char)
+        elif char == ' ' and not in_quote:
+            # Spasi di luar kutip menandakan akhir dari sebuah token
+            if current_token:
+                tokens.append("".join(current_token))
+                current_token = []
+        else:
+            # Karakter lainnya masuk ke token saat ini
+            current_token.append(char)
+            
+    # Masukkan sisa karakter sebagai token terakhir
+    if current_token:
+        tokens.append("".join(current_token))
+        
+    return tokens
 
 def is_exit_command(tokens: List[str]) -> bool:
     """Mengecek apakah pengguna meminta shell untuk berhenti."""
@@ -44,6 +77,158 @@ def handle_command(tokens: List[str]) -> bool:
 
     command = tokens[0]
     arguments = tokens[1:]
+
+    if command == "cd":
+        if arguments:
+            try:
+                os.chdir(arguments[0])
+            except FileNotFoundError:
+                print(f"cd: {arguments[0]}: No such file or directory")
+            except NotADirectoryError:
+                print(f"cd: {arguments[0]}: Not a directory")
+            except PermissionError:
+                print(f"cd: {arguments[0]}: Permission denied")
+        else:
+            # Jika cd dipanggil tanpa argumen, ubah ke direktori home
+            try:
+                os.chdir(os.path.expanduser("~"))
+            except Exception as e:
+                print(f"cd: {e}")
+        return True
+        
+    elif command == "pwd":
+        try:
+            print(os.getcwd())
+        except Exception as e:
+            print(f"pwd: {e}")
+        return True
+        
+    elif command == "echo":
+        # Menampilkan kembali teks yang di-passing sebagai argumen
+        print(" ".join(arguments))
+        return True
+        
+    elif command == "ls":
+        try:
+            # Jika ada argumen, list isi direktori tersebut. Jika tidak, gunakan direktori saat ini.
+            target_dir = arguments[0] if arguments else "."
+            files = os.listdir(target_dir)
+            for f in sorted(files):
+                print(f)
+        except FileNotFoundError:
+            print(f"ls: {target_dir}: No such file or directory")
+        except NotADirectoryError:
+            print(f"ls: {target_dir}: Not a directory")
+        except PermissionError:
+            print(f"ls: {target_dir}: Permission denied")
+        except Exception as e:
+            print(f"ls: {e}")
+        return True
+        
+    elif command == "touch":
+        if not arguments:
+            print("touch: missing file operand")
+        else:
+            # Touch mendukung multiple file (contoh: touch file1.txt file2.txt)
+            for filename in arguments:
+                try:
+                    # Buka dengan mode append ('a') agar file dibuat jika belum ada,
+                    # dan tidak menghapus isi jika file sudah ada (analog dengan O_CREAT).
+                    with open(filename, 'a'):
+                        pass
+                    # Perbarui timestamp access dan modification ke waktu sekarang
+                    os.utime(filename, None)
+                except Exception as e:
+                    print(f"touch: cannot touch '{filename}': {e}")
+        return True
+        
+    elif command == "mkdir":
+        if not arguments:
+            print("mkdir: missing operand")
+        else:
+            # Mendukung pembuatan beberapa direktori sekaligus (misal: mkdir dir1 dir2)
+            for dirname in arguments:
+                try:
+                    os.mkdir(dirname)
+                except FileExistsError:
+                    print(f"mkdir: cannot create directory '{dirname}': File exists")
+                except FileNotFoundError:
+                    print(f"mkdir: cannot create directory '{dirname}': No such file or directory")
+                except PermissionError:
+                    print(f"mkdir: cannot create directory '{dirname}': Permission denied")
+                except Exception as e:
+                    print(f"mkdir: cannot create directory '{dirname}': {e}")
+        return True
+        
+    elif command == "rmdir":
+        if not arguments:
+            print("rmdir: missing operand")
+        else:
+            for dirname in arguments:
+                try:
+                    os.rmdir(dirname)
+                except FileNotFoundError:
+                    print(f"rmdir: failed to remove '{dirname}': No such file or directory")
+                except NotADirectoryError:
+                    print(f"rmdir: failed to remove '{dirname}': Not a directory")
+                except OSError as e:
+                    # Termasuk error jika direktori tidak kosong (Directory not empty)
+                    print(f"rmdir: failed to remove '{dirname}': {e.strerror}")
+                except Exception as e:
+                    print(f"rmdir: failed to remove '{dirname}': {e}")
+        return True
+        
+    elif command == "rm":
+        if not arguments:
+            print("rm: missing operand")
+        else:
+            for filename in arguments:
+                try:
+                    os.remove(filename)
+                except FileNotFoundError:
+                    print(f"rm: cannot remove '{filename}': No such file or directory")
+                except IsADirectoryError:
+                    # Di Windows kadang muncul sebagai PermissionError, tapi kita tangkap standar POSIX-nya
+                    print(f"rm: cannot remove '{filename}': Is a directory")
+                except PermissionError:
+                    print(f"rm: cannot remove '{filename}': Permission denied (might be a directory)")
+                except Exception as e:
+                    print(f"rm: cannot remove '{filename}': {e}")
+        return True
+        
+    elif command == "cat":
+        if not arguments:
+            print("cat: missing operand")
+        else:
+            # cat membaca semua file yang diberikan dalam argumen dan menggabungkannya ke standar output
+            for filename in arguments:
+                try:
+                    with open(filename, 'r') as f:
+                        MAX_CHARS = 2000  # Batas maksimal karakter yang ditampilkan
+                        
+                        # Membaca isi file hingga batas maksimal
+                        content = f.read(MAX_CHARS)
+                        print(content, end="")
+                        
+                        # Mengecek apakah masih ada sisa teks dengan mencoba membaca 1 karakter ekstra
+                        if f.read(1):
+                            print(f"\n\n[... File terlalu besar. Sisa teks disembunyikan setelah {MAX_CHARS} karakter ...]")
+                except FileNotFoundError:
+                    print(f"cat: {filename}: No such file or directory")
+                except IsADirectoryError:
+                    print(f"cat: {filename}: Is a directory")
+                except PermissionError:
+                    print(f"cat: {filename}: Permission denied")
+                except Exception as e:
+                    print(f"cat: {filename}: {e}")
+            # Cetak baris baru (newline) ekstra di akhir untuk merapikan prompt berikutnya
+            print()
+        return True
+        
+    elif command == "clear":
+        # Menghapus teks pada layar terminal/console
+        os.system('cls' if os.name == 'nt' else 'clear')
+        return True
 
     # Output Mingguan: Membuktikan CLI mengenali kata per kata
     print(f"[DEBUG] Command Utama : '{command}'")
