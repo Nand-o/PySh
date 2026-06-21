@@ -81,7 +81,7 @@ def handle_command(tokens: List[str]) -> bool:
     if command == "cd":
         if arguments:
             try:
-                os.chdir(arguments[0])
+                os.chdir(os.path.expanduser(arguments[0]))
             except FileNotFoundError:
                 print(f"cd: {arguments[0]}: No such file or directory")
             except NotADirectoryError:
@@ -108,134 +108,46 @@ def handle_command(tokens: List[str]) -> bool:
         print(" ".join(arguments))
         return True
         
-    elif command == "ls":
-        try:
-            # Jika ada argumen, list isi direktori tersebut. Jika tidak, gunakan direktori saat ini.
-            target_dir = arguments[0] if arguments else "."
-            files = os.listdir(target_dir)
-            for f in sorted(files):
-                print(f)
-        except FileNotFoundError:
-            print(f"ls: {target_dir}: No such file or directory")
-        except NotADirectoryError:
-            print(f"ls: {target_dir}: Not a directory")
-        except PermissionError:
-            print(f"ls: {target_dir}: Permission denied")
-        except Exception as e:
-            print(f"ls: {e}")
-        return True
-        
-    elif command == "touch":
-        if not arguments:
-            print("touch: missing file operand")
-        else:
-            # Touch mendukung multiple file (contoh: touch file1.txt file2.txt)
-            for filename in arguments:
-                try:
-                    # Buka dengan mode append ('a') agar file dibuat jika belum ada,
-                    # dan tidak menghapus isi jika file sudah ada (analog dengan O_CREAT).
-                    with open(filename, 'a'):
-                        pass
-                    # Perbarui timestamp access dan modification ke waktu sekarang
-                    os.utime(filename, None)
-                except Exception as e:
-                    print(f"touch: cannot touch '{filename}': {e}")
-        return True
-        
-    elif command == "mkdir":
-        if not arguments:
-            print("mkdir: missing operand")
-        else:
-            # Mendukung pembuatan beberapa direktori sekaligus (misal: mkdir dir1 dir2)
-            for dirname in arguments:
-                try:
-                    os.mkdir(dirname)
-                except FileExistsError:
-                    print(f"mkdir: cannot create directory '{dirname}': File exists")
-                except FileNotFoundError:
-                    print(f"mkdir: cannot create directory '{dirname}': No such file or directory")
-                except PermissionError:
-                    print(f"mkdir: cannot create directory '{dirname}': Permission denied")
-                except Exception as e:
-                    print(f"mkdir: cannot create directory '{dirname}': {e}")
-        return True
-        
-    elif command == "rmdir":
-        if not arguments:
-            print("rmdir: missing operand")
-        else:
-            for dirname in arguments:
-                try:
-                    os.rmdir(dirname)
-                except FileNotFoundError:
-                    print(f"rmdir: failed to remove '{dirname}': No such file or directory")
-                except NotADirectoryError:
-                    print(f"rmdir: failed to remove '{dirname}': Not a directory")
-                except OSError as e:
-                    # Termasuk error jika direktori tidak kosong (Directory not empty)
-                    print(f"rmdir: failed to remove '{dirname}': {e.strerror}")
-                except Exception as e:
-                    print(f"rmdir: failed to remove '{dirname}': {e}")
-        return True
-        
-    elif command == "rm":
-        if not arguments:
-            print("rm: missing operand")
-        else:
-            for filename in arguments:
-                try:
-                    os.remove(filename)
-                except FileNotFoundError:
-                    print(f"rm: cannot remove '{filename}': No such file or directory")
-                except IsADirectoryError:
-                    # Di Windows kadang muncul sebagai PermissionError, tapi kita tangkap standar POSIX-nya
-                    print(f"rm: cannot remove '{filename}': Is a directory")
-                except PermissionError:
-                    print(f"rm: cannot remove '{filename}': Permission denied (might be a directory)")
-                except Exception as e:
-                    print(f"rm: cannot remove '{filename}': {e}")
-        return True
-        
-    elif command == "cat":
-        if not arguments:
-            print("cat: missing operand")
-        else:
-            # cat membaca semua file yang diberikan dalam argumen dan menggabungkannya ke standar output
-            for filename in arguments:
-                try:
-                    with open(filename, 'r') as f:
-                        MAX_CHARS = 2000  # Batas maksimal karakter yang ditampilkan
-                        
-                        # Membaca isi file hingga batas maksimal
-                        content = f.read(MAX_CHARS)
-                        print(content, end="")
-                        
-                        # Mengecek apakah masih ada sisa teks dengan mencoba membaca 1 karakter ekstra
-                        if f.read(1):
-                            print(f"\n\n[... File terlalu besar. Sisa teks disembunyikan setelah {MAX_CHARS} karakter ...]")
-                except FileNotFoundError:
-                    print(f"cat: {filename}: No such file or directory")
-                except IsADirectoryError:
-                    print(f"cat: {filename}: Is a directory")
-                except PermissionError:
-                    print(f"cat: {filename}: Permission denied")
-                except Exception as e:
-                    print(f"cat: {filename}: {e}")
-            # Cetak baris baru (newline) ekstra di akhir untuk merapikan prompt berikutnya
-            print()
-        return True
-        
-    elif command == "clear":
-        # Menghapus teks pada layar terminal/console
-        os.system('cls' if os.name == 'nt' else 'clear')
-        return True
-
-    # Output Mingguan: Membuktikan CLI mengenali kata per kata
-    print(f"[DEBUG] Command Utama : '{command}'")
-    if arguments:
-        print(f"[DEBUG] Argumen       : {arguments}")
     else:
-        print("[DEBUG] Argumen       : (Tidak ada)")
+        # [Tahap 4] Perintah eksternal: Implementasi fork() dan execvp()
+        try:
+            # Menduplikasi proses shell menjadi child process
+            pid = os.fork()
+            
+            if pid == 0:
+                # === Child Process ===
+                try:
+                    # Menimpa memori child process dengan program baru (command)
+                    # os.execvp menerima nama program dan list argument (termasuk nama program itu sendiri)
+                    os.execvp(command, tokens)
+                except FileNotFoundError:
+                    print(f"pysh: {command}: command not found")
+                    # Pastikan child process berhenti jika perintah tidak ditemukan
+                    sys.exit(1)
+                except Exception as e:
+                    print(f"pysh: {command}: eksekusi gagal ({e})")
+                    sys.exit(1)
+                    
+            elif pid > 0:
+                # === Parent Process ===
+                # Parent (shell) menunggu hingga child process selesai dieksekusi
+                try:
+                    os.waitpid(pid, 0)
+                except ChildProcessError:
+                    pass
+            else:
+                print("pysh: fork failed")
+                
+        except AttributeError:
+            # Fallback untuk sistem operasi Windows yang tidak mendukung os.fork()
+            # Ini hanya agar shell tidak crash ketika dicoba di Windows.
+            import subprocess
+            try:
+                subprocess.run(tokens, shell=True)
+            except FileNotFoundError:
+                print(f"pysh: {command}: command not found")
+            except Exception as e:
+                print(f"pysh: {command}: eksekusi gagal ({e})")
 
     return True
 
