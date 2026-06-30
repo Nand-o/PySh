@@ -1,4 +1,5 @@
 import os
+from .colors import green, blue, cyan
 
 PROMPT = "pysh> "
 
@@ -10,9 +11,11 @@ def get_prompt() -> str:
         
     parts = cwd.split(os.sep)
     if len(parts) > 3:
-        return f"[{parts[0]}{os.sep}...{os.sep}{parts[-1]}] {PROMPT}"
+        path_str = f"{parts[0]}{os.sep}...{os.sep}{parts[-1]}"
     else:
-        return f"[{cwd}] {PROMPT}"
+        path_str = cwd
+        
+    return f"[{blue(path_str)}] {cyan(PROMPT)}"
 
 def read_input(prompt: str) -> str:
     try:
