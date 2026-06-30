@@ -7,6 +7,9 @@ class TokenType(Enum):
     REDIRECT_OUT = auto()
     REDIRECT_APPEND = auto()
     REDIRECT_IN = auto()
+    REDIRECT_ERR = auto()
+    REDIRECT_ERR_APPEND = auto()
+    REDIRECT_ERR_TO_OUT = auto()
 
 @dataclass(frozen=True)
 class Token:

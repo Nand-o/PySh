@@ -12,6 +12,12 @@ def determine_type(value: str, is_quoted: bool) -> TokenType:
         return TokenType.REDIRECT_APPEND
     if value == "<":
         return TokenType.REDIRECT_IN
+    if value == "2>":
+        return TokenType.REDIRECT_ERR
+    if value == "2>>":
+        return TokenType.REDIRECT_ERR_APPEND
+    if value == "2>&1":
+        return TokenType.REDIRECT_ERR_TO_OUT
     return TokenType.WORD
 
 def tokenize_input(command_line: str) -> List[Token]:

@@ -19,6 +19,16 @@ def apply_redirects(redirects: List[Redirect]) -> bool:
                 fd = os.open(red.target, os.O_RDONLY)
                 os.dup2(fd, 0)
                 os.close(fd)
+            elif red.type == TokenType.REDIRECT_ERR:
+                fd = os.open(red.target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+                os.dup2(fd, 2)
+                os.close(fd)
+            elif red.type == TokenType.REDIRECT_ERR_APPEND:
+                fd = os.open(red.target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+                os.dup2(fd, 2)
+                os.close(fd)
+            elif red.type == TokenType.REDIRECT_ERR_TO_OUT:
+                os.dup2(1, 2)
         except OSError as e:
             print(f"pysh: {red.target}: {e.strerror}")
             return False
