@@ -5,9 +5,33 @@ from typing import List
 PROMPT = "pysh> "
 EXIT_COMMAND = "exit"
 
+class Token(str):
+    """
+    Subclass string untuk menyimpan metadata tokenisasi,
+    sehingga karakter spesial yang diapit tanda kutip (misal "|")
+    tidak akan disamakan dengan operator shell sesungguhnya.
+    """
+    def __new__(cls, content, is_quoted=False):
+        obj = super().__new__(cls, content)
+        obj.is_quoted = is_quoted
+        return obj
+
+    def __eq__(self, other):
+        # Jika membandingkan dengan raw string ("|", ">", dll)
+        if type(other) is str and self.is_quoted:
+            return False
+        return super().__eq__(other)
+
+    def __hash__(self):
+        return super().__hash__()
+
 def get_prompt() -> str:
     """Mengembalikan teks prompt yang ditampilkan kepada pengguna."""
-    cwd = os.getcwd()
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        cwd = "(unreachable)"
+        
     parts = cwd.split(os.sep)
     if len(parts) > 3:
         return f"[{parts[0]}{os.sep}...{os.sep}{parts[-1]}] {PROMPT}"
@@ -23,6 +47,9 @@ def read_input(prompt: str) -> str:
         return input(prompt)
     except EOFError:
         return EXIT_COMMAND
+    except UnicodeDecodeError:
+        print("\npysh: input mengandung karakter invalid")
+        return ""
 
 def tokenize_input(command_line: str) -> List[str]:
     """
@@ -32,33 +59,51 @@ def tokenize_input(command_line: str) -> List[str]:
     tokens = []
     current_token = []
     in_quote = None
+    has_quote = False
+    escape_next = False
 
     for char in command_line.strip():
+        if escape_next:
+            current_token.append(char)
+            escape_next = False
+            continue
+
+        if char == '\\':
+            escape_next = True
+            continue
+
         if char in ('"', "'"):
             if in_quote == char:
                 in_quote = None
             elif in_quote is None:
                 in_quote = char
+                has_quote = True
             else:
                 current_token.append(char)
-        elif char == ' ' and not in_quote:
-            if current_token:
-                tokens.append("".join(current_token))
+        elif char in (' ', '\t') and not in_quote:
+            if current_token or has_quote:
+                tokens.append(Token("".join(current_token), is_quoted=has_quote))
                 current_token = []
+                has_quote = False
         else:
             current_token.append(char)
             
-    if current_token:
-        tokens.append("".join(current_token))
+    if in_quote:
+        print(f"pysh: warning: unclosed quote {in_quote}")
+            
+    if current_token or has_quote:
+        tokens.append(Token("".join(current_token), is_quoted=has_quote))
         
     return tokens
 
 def is_exit_command(tokens: List[str]) -> bool:
     """Mengecek perintah keluar."""
-    return len(tokens) > 0 and tokens[0].lower() == EXIT_COMMAND
+    return len(tokens) > 0 and tokens[0] == EXIT_COMMAND
 
 def execute_external_command(tokens: List[str]):
     """Pendelegasian eksekusi murni via POSIX execvp."""
+    if not tokens:
+        sys.exit(0)
     try:
         os.execvp(tokens[0], tokens)
     except FileNotFoundError:
@@ -67,6 +112,43 @@ def execute_external_command(tokens: List[str]):
     except Exception as e:
         print(f"pysh: {tokens[0]}: eksekusi gagal ({e})")
         sys.exit(1)
+
+def process_redirects_and_execute(tokens: List[str]):
+    """Memproses semua redirect operators dan menjalankan command."""
+    clean_tokens = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in (">", ">>", "<"):
+            if i + 1 >= len(tokens):
+                print(f"pysh: syntax error near unexpected token 'newline'")
+                return 1
+            
+            file_name = tokens[i+1]
+            try:
+                if token == ">":
+                    fd = os.open(file_name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+                    os.dup2(fd, 1)
+                    os.close(fd)
+                elif token == ">>":
+                    fd = os.open(file_name, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+                    os.dup2(fd, 1)
+                    os.close(fd)
+                elif token == "<":
+                    fd = os.open(file_name, os.O_RDONLY)
+                    os.dup2(fd, 0)
+                    os.close(fd)
+            except OSError as e:
+                print(f"pysh: {file_name}: {e.strerror}")
+                return 1
+            i += 2
+        else:
+            clean_tokens.append(token)
+            i += 1
+            
+    if clean_tokens:
+        execute_external_command(clean_tokens)
+    return 0
 
 def handle_command(tokens: List[str]) -> bool:
     """Memproses command, Built-in, Piping (|), dan Redirection (>, >>, <)."""
@@ -93,119 +175,79 @@ def handle_command(tokens: List[str]) -> bool:
         except Exception as e:
             print(f"pwd: {e}")
         return True
-        
-    # CATATAN PENYESUAIAN: Perintah internal 'echo' sengaja dihapus dari sini.
-    # Jika dipertahankan, shell Pysh akan mencegat eksekusinya dan menggagalkan
-    # operasi redirection seperti `echo "teks" > file.txt`. 
-    # Dengan menghapusnya, Pysh akan meneruskan perintah echo ke binary asli OS.
 
     # === KOMPATIBILITAS OS ===
-    # Kompatibilitas Lingkungan Windows via exception OS
     if not hasattr(os, 'fork'):
         import subprocess
-        # Parameter shell=True menyelesaikan masalah batch script & metakarakter Windows
-        subprocess.run(" ".join(tokens), shell=True)
+        try:
+            subprocess.run(tokens, shell=False)
+        except FileNotFoundError:
+            print(f"pysh: {tokens[0]}: command not found")
+        except Exception as e:
+            print(f"pysh: eksekusi gagal: {e}")
         return True
 
     # === TAHAP 5: Piping (|) ===
-    # Menghubungkan output dari proses pertama (kiri) menjadi input bagi proses kedua (kanan)
     if "|" in tokens:
-        pipe_index = tokens.index("|")
-        left_cmd = tokens[:pipe_index]
-        right_cmd = tokens[pipe_index+1:]
-
-        # Membuka saluran komunikasi IPC
-        read_fd, write_fd = os.pipe()
-
-        pid1 = os.fork()
-        if pid1 == 0:
-            # Child 1 (Proses Kiri): Menulis ke pipe
-            os.close(read_fd)         
-            os.dup2(write_fd, 1)      # Alihkan STDOUT ke pipe write end
-            os.close(write_fd)        
-            execute_external_command(left_cmd)
-
-        pid2 = os.fork()
-        if pid2 == 0:
-            # Child 2 (Proses Kanan): Membaca dari pipe
-            os.close(write_fd)        
-            os.dup2(read_fd, 0)       # Alihkan STDIN ke pipe read end
-            os.close(read_fd)         
-            execute_external_command(right_cmd)
-
-        # Parent Process: Wajib menutup kedua ujung pipe untuk mencegah deadlock (hang)
-        os.close(read_fd)
-        os.close(write_fd)
+        pipe_commands = []
+        current_cmd = []
+        for t in tokens:
+            if t == "|":
+                pipe_commands.append(current_cmd)
+                current_cmd = []
+            else:
+                current_cmd.append(t)
+        pipe_commands.append(current_cmd)
         
-        # Parent menunggu kedua child selesai
-        os.waitpid(pid1, 0)
-        os.waitpid(pid2, 0)
-        
-        return True
+        if any(not cmd for cmd in pipe_commands):
+            print("pysh: syntax error near unexpected token '|'")
+            return True
 
-    # === TAHAP 5: I/O Redirection (>, >>, <) ===
-    # Mengarahkan output standar ke file teks atau membaca input dari file teks
-    redirect_out = ">" in tokens
-    redirect_append = ">>" in tokens
-    redirect_in = "<" in tokens
+        num_pipes = len(pipe_commands) - 1
+        pipes = [os.pipe() for _ in range(num_pipes)]
+        pids = []
 
-    if redirect_out or redirect_append or redirect_in:
-        pid = os.fork()
-        
-        if pid == 0:
-            # Di dalam Child Process, lakukan manipulasi File Descriptor sebelum execvp
-            if redirect_append:
-                idx = tokens.index(">>")
-                cmd_tokens = tokens[:idx]
-                file_name = tokens[idx+1]
-                
-                # O_APPEND: Tambahkan output ke bawah baris tanpa menghapus file asli
-                fd = os.open(file_name, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-                os.dup2(fd, 1)
-                os.close(fd)
-                execute_external_command(cmd_tokens)
-                
-            elif redirect_out:
-                idx = tokens.index(">")
-                cmd_tokens = tokens[:idx]
-                file_name = tokens[idx+1]
-                
-                # O_TRUNC: Hapus isi file lama, ganti dengan output yang baru
-                fd = os.open(file_name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-                os.dup2(fd, 1)        
-                os.close(fd)
-                execute_external_command(cmd_tokens)
+        for i in range(len(pipe_commands)):
+            try:
+                pid = os.fork()
+            except OSError as e:
+                print(f"pysh: fork failed: {e}")
+                break
 
-            elif redirect_in:
-                idx = tokens.index("<")
-                cmd_tokens = tokens[:idx]
-                file_name = tokens[idx+1]
+            if pid == 0:
+                if i > 0:
+                    os.dup2(pipes[i-1][0], 0)
+                if i < num_pipes:
+                    os.dup2(pipes[i][1], 1)
                 
-                try:
-                    # O_RDONLY: Buka file hanya untuk dibaca
-                    fd = os.open(file_name, os.O_RDONLY)
-                    os.dup2(fd, 0)    # Alihkan STDIN (0) agar membaca dari file
-                    os.close(fd)
-                    execute_external_command(cmd_tokens)
-                except FileNotFoundError:
-                    print(f"pysh: {file_name}: No such file or directory")
-                    sys.exit(1)
-                    
-        elif pid > 0:
-            # Parent menunggu proses redirection selesai
+                for p in pipes:
+                    os.close(p[0])
+                    os.close(p[1])
+                
+                sys.exit(process_redirects_and_execute(pipe_commands[i]))
+            else:
+                pids.append(pid)
+
+        for p in pipes:
+            os.close(p[0])
+            os.close(p[1])
+
+        for pid in pids:
             os.waitpid(pid, 0)
-            
+        
         return True
 
-    # === TAHAP 4: External Command Biasa ===
-    pid = os.fork()
+    # === TAHAP 5: I/O Redirection & TAHAP 4: External Command Biasa ===
+    try:
+        pid = os.fork()
+    except OSError as e:
+        print(f"pysh: fork failed: {e}")
+        return True
+        
     if pid == 0:
-        execute_external_command(tokens)
+        sys.exit(process_redirects_and_execute(tokens))
     elif pid > 0:
-        # Menyinkronkan siklus hidup proses (mencegah prompt mendahului output)
         os.waitpid(pid, 0)
-    else:
-        print("pysh: fork failed")
 
     return True
 
@@ -226,8 +268,10 @@ def run_shell():
                 break
                 
         except KeyboardInterrupt:
-            # Mencegah eksekusi berhenti mendadak saat Ctrl+C ditekan
             print()
+            continue
+        except Exception as e:
+            print(f"pysh: unexpected error: {e}")
             continue
 
 if __name__ == "__main__":
