@@ -1,234 +1,140 @@
+"""
+pysh.py — Entry Point Utama PySh (Python Shell)
+=================================================
+File ini adalah titik masuk (entry point) utama dari shell PySh.
+Ia bertanggung jawab untuk menginisialisasi seluruh subsistem shell
+dan menjalankan REPL (Read-Eval-Print Loop), yaitu siklus utama
+yang terus membaca input, memprosesnya, dan menampilkan hasilnya.
+
+Alur Kerja Utama:
+    1. Inisialisasi: Memuat riwayat perintah, mengaktifkan tab completion,
+       dan mengeksekusi file konfigurasi ~/.pyshrc (jika ada).
+    2. Loop REPL:
+       a. Tampilkan prompt → Baca input pengguna.
+       b. Tokenisasi input → Parsing menjadi CommandSegment.
+       c. Eksekusi pipeline/perintah.
+       d. Ulangi sampai pengguna mengetik 'exit'.
+    3. Cleanup: Simpan riwayat perintah ke file sebelum keluar.
+
+Penanganan Error:
+    - KeyboardInterrupt (Ctrl+C) : Membatalkan input saat ini tanpa
+      menghentikan shell. Prompt baru akan ditampilkan.
+    - Exception umum : Ditangkap dan ditampilkan sebagai pesan error,
+      menjaga shell tetap berjalan meskipun terjadi kesalahan.
+
+Cara Menjalankan:
+    $ python pysh.py
+"""
+
+from core.prompt import get_prompt, read_input
+from core.tokenizer import tokenize_input
+from core.parser import parse_pipeline
+from core.pipes import execute_pipeline
+from core.builtins import EXIT_COMMAND
+from core.history import init_history, save_history
+from core.completion import init_completion
 import os
-import sys
-from typing import List
 
-PROMPT = "pysh> "
-EXIT_COMMAND = "exit"
 
-def get_prompt() -> str:
-    """Mengembalikan teks prompt yang ditampilkan kepada pengguna."""
-    cwd = os.getcwd()
-    parts = cwd.split(os.sep)
-    if len(parts) > 3:
-        return f"[{parts[0]}{os.sep}...{os.sep}{parts[-1]}] {PROMPT}"
-    else:
-        return f"[{cwd}] {PROMPT}"
-
-def read_input(prompt: str) -> str:
+def load_pyshrc():
     """
-    Membaca satu baris input.
-    Menangani Ctrl+D (EOFError) agar tidak force close.
+    Memuat dan mengeksekusi file konfigurasi startup ~/.pyshrc.
+
+    File .pyshrc berfungsi seperti .bashrc pada Bash — berisi perintah-
+    perintah yang akan dieksekusi secara otomatis setiap kali shell
+    dibuka. Berguna untuk mengatur alias, variabel lingkungan, atau
+    perintah inisialisasi lainnya.
+
+    Format file:
+        - Baris kosong dan baris yang diawali '#' (komentar) diabaikan.
+        - Setiap baris lainnya diperlakukan sebagai perintah shell biasa.
+
+    Contoh isi ~/.pyshrc:
+        # Konfigurasi PySh
+        cd ~/projects
     """
-    try:
-        return input(prompt)
-    except EOFError:
-        return EXIT_COMMAND
-
-def tokenize_input(command_line: str) -> List[str]:
-    """
-    Memecah string input menjadi token menggunakan character iteration.
-    Mengakomodasi spasi di dalam tanda kutip tunggal/ganda.
-    """
-    tokens = []
-    current_token = []
-    in_quote = None
-
-    for char in command_line.strip():
-        if char in ('"', "'"):
-            if in_quote == char:
-                in_quote = None
-            elif in_quote is None:
-                in_quote = char
-            else:
-                current_token.append(char)
-        elif char == ' ' and not in_quote:
-            if current_token:
-                tokens.append("".join(current_token))
-                current_token = []
-        else:
-            current_token.append(char)
-            
-    if current_token:
-        tokens.append("".join(current_token))
-        
-    return tokens
-
-def is_exit_command(tokens: List[str]) -> bool:
-    """Mengecek perintah keluar."""
-    return len(tokens) > 0 and tokens[0].lower() == EXIT_COMMAND
-
-def execute_external_command(tokens: List[str]):
-    """Pendelegasian eksekusi murni via POSIX execvp."""
-    try:
-        os.execvp(tokens[0], tokens)
-    except FileNotFoundError:
-        print(f"pysh: {tokens[0]}: command not found")
-        sys.exit(1)
-    except Exception as e:
-        print(f"pysh: {tokens[0]}: eksekusi gagal ({e})")
-        sys.exit(1)
-
-def handle_command(tokens: List[str]) -> bool:
-    """Memproses command, Built-in, Piping (|), dan Redirection (>, >>, <)."""
-    if not tokens:
-        return True
-
-    if is_exit_command(tokens):
-        return False
-
-    command = tokens[0]
-
-    # === TAHAP 3: Built-in Commands ===
-    if command == "cd":
+    pyshrc_path = os.path.expanduser("~/.pyshrc")
+    if os.path.exists(pyshrc_path):
         try:
-            target_dir = os.path.expanduser(tokens[1]) if len(tokens) > 1 else os.path.expanduser("~")
-            os.chdir(target_dir)
+            with open(pyshrc_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    # Lewati baris kosong dan komentar
+                    if not line or line.startswith('#'):
+                        continue
+                    tokens = tokenize_input(line)
+                    segments = parse_pipeline(tokens)
+                    if segments:
+                        execute_pipeline(segments)
         except Exception as e:
-            print(f"cd: {e}")
-        return True
-        
-    elif command == "pwd":
-        try:
-            print(os.getcwd())
-        except Exception as e:
-            print(f"pwd: {e}")
-        return True
-        
-    # CATATAN PENYESUAIAN: Perintah internal 'echo' sengaja dihapus dari sini.
-    # Jika dipertahankan, shell Pysh akan mencegat eksekusinya dan menggagalkan
-    # operasi redirection seperti `echo "teks" > file.txt`. 
-    # Dengan menghapusnya, Pysh akan meneruskan perintah echo ke binary asli OS.
+            print(f"pysh: error loading .pyshrc: {e}")
 
-    # === KOMPATIBILITAS OS ===
-    # Kompatibilitas Lingkungan Windows via exception OS
-    if not hasattr(os, 'fork'):
-        import subprocess
-        # Parameter shell=True menyelesaikan masalah batch script & metakarakter Windows
-        subprocess.run(" ".join(tokens), shell=True)
-        return True
-
-    # === TAHAP 5: Piping (|) ===
-    # Menghubungkan output dari proses pertama (kiri) menjadi input bagi proses kedua (kanan)
-    if "|" in tokens:
-        pipe_index = tokens.index("|")
-        left_cmd = tokens[:pipe_index]
-        right_cmd = tokens[pipe_index+1:]
-
-        # Membuka saluran komunikasi IPC
-        read_fd, write_fd = os.pipe()
-
-        pid1 = os.fork()
-        if pid1 == 0:
-            # Child 1 (Proses Kiri): Menulis ke pipe
-            os.close(read_fd)         
-            os.dup2(write_fd, 1)      # Alihkan STDOUT ke pipe write end
-            os.close(write_fd)        
-            execute_external_command(left_cmd)
-
-        pid2 = os.fork()
-        if pid2 == 0:
-            # Child 2 (Proses Kanan): Membaca dari pipe
-            os.close(write_fd)        
-            os.dup2(read_fd, 0)       # Alihkan STDIN ke pipe read end
-            os.close(read_fd)         
-            execute_external_command(right_cmd)
-
-        # Parent Process: Wajib menutup kedua ujung pipe untuk mencegah deadlock (hang)
-        os.close(read_fd)
-        os.close(write_fd)
-        
-        # Parent menunggu kedua child selesai
-        os.waitpid(pid1, 0)
-        os.waitpid(pid2, 0)
-        
-        return True
-
-    # === TAHAP 5: I/O Redirection (>, >>, <) ===
-    # Mengarahkan output standar ke file teks atau membaca input dari file teks
-    redirect_out = ">" in tokens
-    redirect_append = ">>" in tokens
-    redirect_in = "<" in tokens
-
-    if redirect_out or redirect_append or redirect_in:
-        pid = os.fork()
-        
-        if pid == 0:
-            # Di dalam Child Process, lakukan manipulasi File Descriptor sebelum execvp
-            if redirect_append:
-                idx = tokens.index(">>")
-                cmd_tokens = tokens[:idx]
-                file_name = tokens[idx+1]
-                
-                # O_APPEND: Tambahkan output ke bawah baris tanpa menghapus file asli
-                fd = os.open(file_name, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-                os.dup2(fd, 1)
-                os.close(fd)
-                execute_external_command(cmd_tokens)
-                
-            elif redirect_out:
-                idx = tokens.index(">")
-                cmd_tokens = tokens[:idx]
-                file_name = tokens[idx+1]
-                
-                # O_TRUNC: Hapus isi file lama, ganti dengan output yang baru
-                fd = os.open(file_name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-                os.dup2(fd, 1)        
-                os.close(fd)
-                execute_external_command(cmd_tokens)
-
-            elif redirect_in:
-                idx = tokens.index("<")
-                cmd_tokens = tokens[:idx]
-                file_name = tokens[idx+1]
-                
-                try:
-                    # O_RDONLY: Buka file hanya untuk dibaca
-                    fd = os.open(file_name, os.O_RDONLY)
-                    os.dup2(fd, 0)    # Alihkan STDIN (0) agar membaca dari file
-                    os.close(fd)
-                    execute_external_command(cmd_tokens)
-                except FileNotFoundError:
-                    print(f"pysh: {file_name}: No such file or directory")
-                    sys.exit(1)
-                    
-        elif pid > 0:
-            # Parent menunggu proses redirection selesai
-            os.waitpid(pid, 0)
-            
-        return True
-
-    # === TAHAP 4: External Command Biasa ===
-    pid = os.fork()
-    if pid == 0:
-        execute_external_command(tokens)
-    elif pid > 0:
-        # Menyinkronkan siklus hidup proses (mencegah prompt mendahului output)
-        os.waitpid(pid, 0)
-    else:
-        print("pysh: fork failed")
-
-    return True
 
 def run_shell():
-    """Fungsi utama yang menjalankan REPL (Read-Eval-Print Loop)."""
+    """
+    Fungsi utama yang menjalankan REPL (Read-Eval-Print Loop).
+
+    REPL adalah pola desain standar untuk program interaktif:
+        - Read  : Membaca input dari pengguna melalui prompt.
+        - Eval  : Memproses input (tokenisasi → parsing → eksekusi).
+        - Print : Menampilkan hasil eksekusi (dilakukan oleh perintah itu sendiri).
+        - Loop  : Mengulangi proses di atas sampai pengguna mengetik 'exit'.
+
+    Inisialisasi yang dilakukan sebelum loop dimulai:
+        1. init_history()   : Memuat riwayat perintah dari sesi sebelumnya.
+        2. init_completion() : Mengaktifkan fitur Tab completion.
+        3. load_pyshrc()    : Mengeksekusi file konfigurasi startup.
+
+    Cleanup yang dilakukan setelah loop berakhir:
+        1. save_history()   : Menyimpan riwayat perintah ke file.
+    """
+    # === FASE INISIALISASI ===
+    init_history()
+    init_completion()
+    load_pyshrc()
+
+    # === FASE LOOP UTAMA (REPL) ===
     while True:
         try:
+            # READ: Tampilkan prompt dan baca input pengguna
             user_input = read_input(get_prompt())
-            
+
+            # Abaikan input kosong (pengguna hanya menekan Enter)
             if not user_input.strip():
                 continue
 
+            # EVAL: Tokenisasi → Parsing
             tokens = tokenize_input(user_input)
-            status = handle_command(tokens)
-            
-            if not status:
+            segments = parse_pipeline(tokens)
+
+            # Jika parsing gagal (syntax error), lanjut ke prompt berikutnya
+            if not segments:
+                continue
+
+            # Cek perintah exit secara khusus di parent process.
+            # Perintah exit harus ditangani di sini (bukan di builtins)
+            # karena hanya parent process yang bisa menghentikan loop REPL.
+            if len(segments) == 1 and segments[0].args and segments[0].args[0] == EXIT_COMMAND:
                 print("Cihuyyy!\n")
                 break
-                
+
+            # EVAL + PRINT: Eksekusi pipeline (output ditangani oleh perintah)
+            execute_pipeline(segments)
+
         except KeyboardInterrupt:
-            # Mencegah eksekusi berhenti mendadak saat Ctrl+C ditekan
+            # Ctrl+C: Batalkan input saat ini, tampilkan prompt baru
             print()
             continue
+        except Exception as e:
+            # Safety net: tangkap semua error tak terduga
+            # agar shell tidak crash dan terus berjalan
+            print(f"pysh: unexpected error: {e}")
+            continue
 
+    # === FASE CLEANUP ===
+    save_history()
+
+
+# Entry point: jalankan shell jika file ini dieksekusi langsung
 if __name__ == "__main__":
     run_shell()
