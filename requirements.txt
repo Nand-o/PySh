@@ -1,0 +1,19 @@
+# ============================================================
+# PySh — Project Dependencies (requirements.txt)
+# ============================================================
+# File ini memuat daftar library pihak ketiga yang dibutuhkan
+# untuk menjalankan antarmuka dan test suite dari PySh.
+#
+# Cara install:
+#   pip install -r requirements.txt
+# ============================================================
+
+# Library untuk pewarnaan teks di terminal (mendukung Windows & POSIX)
+colorama>=0.4.6
+
+# Library pengganti GNU readline untuk sistem operasi Windows
+# (Dibutuhkan untuk fitur command history dan tab completion di Windows)
+pyreadline3>=3.4.1; sys_platform == 'win32'
+
+# Framework pengujian otomatis (QA suite)
+pytest>=7.0.0
